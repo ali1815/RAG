@@ -1,7 +1,7 @@
 # app.py
 import os
 import streamlit as st
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
@@ -12,10 +12,10 @@ from sentence_transformers import SentenceTransformer
 from langchain_community.vectorstores import FAISS
 
 # Set page config
-st.set_page_config(page_title="RAG Demo with DeepSeek", page_icon="📚", layout="wide")
+st.set_page_config(page_title="RAG Demo with Lightweight Models", page_icon="📚", layout="wide")
 
 # App title
-st.title("📚 RAG Application with DeepSeek")
+st.title("📚 RAG Application with Lightweight Models")
 
 # Sidebar with user instructions
 with st.sidebar:
@@ -27,19 +27,27 @@ with st.sidebar:
     """)
     
     model_name = st.selectbox(
-        "Select DeepSeek Model",
-        ["deepseek-ai/deepseek-coder-6.7b-instruct", "deepseek-ai/deepseek-llm-7b-chat"],
-        index=1
+        "Select Language Model",
+        [
+            "google/flan-t5-small",  # 80M parameters
+            "google/flan-t5-base",   # 250M parameters
+            "facebook/opt-350m",     # 350M parameters
+            "facebook/opt-1.3b",     # 1.3B parameters
+            "mistralai/Mistral-7B-Instruct-v0.1"  # 7B parameters
+        ],
+        index=1  # Default to flan-t5-base
     )
     
     st.subheader("About")
     st.markdown("""
     This app uses:
     - *Streamlit* for the interface
-    - *DeepSeek* model for text generation
+    - *Lightweight Hugging Face models* for text generation
     - *FAISS* for vector similarity search
     - *LangChain* for the RAG pipeline
     """)
+    
+    st.info("💡 Tip: Models like flan-t5-small and flan-t5-base are much lighter and faster, suitable for machines with limited RAM.")
 
 # Create a custom embedding class using SentenceTransformer directly
 class CustomEmbeddings:
@@ -135,33 +143,75 @@ with tab2:
         # Initialize custom embeddings
         embeddings = CustomEmbeddings()
         
-        # Load DeepSeek model
+        # Load language model
         @st.cache_resource
         def load_llm(model_name):
             st.info(f"Loading {model_name}... This may take a few minutes.")
             
             try:
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    low_cpu_mem_usage=True,
-                    trust_remote_code=True
-                )
-                
-                # Create pipeline
-                pipe = pipeline(
-                    "text-generation",
-                    model=model,
-                    tokenizer=tokenizer,
-                    max_new_tokens=512,
-                    temperature=0.7,
-                    top_p=0.9,
-                    repetition_penalty=1.1
-                )
-                
-                llm = HuggingFacePipeline(pipeline=pipe)
-                return llm
+                # Specific handling for T5 models which use a different pipeline
+                if "t5" in model_name.lower():
+                    tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        low_cpu_mem_usage=True
+                    )
+                    
+                    # T5 models use 'text2text-generation' task
+                    pipe = pipeline(
+                        "text2text-generation",
+                        model=model,
+                        tokenizer=tokenizer,
+                        max_length=512
+                    )
+                    
+                    # Wrapper function to make T5 output compatible with LangChain
+                    def t5_wrapper(prompt):
+                        result = pipe(prompt, max_length=512)[0]["generated_text"]
+                        return result
+                    
+                    # Create a custom LLM that uses our wrapper
+                    from langchain.llms.base import LLM
+                    from typing import Optional, List, Mapping, Any
+                    
+                    class CustomT5LLM(LLM):
+                        def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+                            return t5_wrapper(prompt)
+                            
+                        @property
+                        def _identifying_params(self) -> Mapping[str, Any]:
+                            return {"name": model_name}
+                            
+                        @property
+                        def _llm_type(self) -> str:
+                            return "custom_t5"
+                    
+                    return CustomT5LLM()
+                    
+                # For OPT and other causal language models
+                else:
+                    tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        low_cpu_mem_usage=True
+                    )
+                    
+                    # Create pipeline
+                    pipe = pipeline(
+                        "text-generation",
+                        model=model,
+                        tokenizer=tokenizer,
+                        max_new_tokens=256,
+                        temperature=0.7,
+                        top_p=0.9,
+                        repetition_penalty=1.1
+                    )
+                    
+                    llm = HuggingFacePipeline(pipeline=pipe)
+                    return llm
+                    
             except Exception as e:
                 st.error(f"Error loading model: {str(e)}")
                 return None
@@ -226,3 +276,11 @@ if 'temp_dir' in st.session_state and os.path.exists(st.session_state['temp_dir'
             st.experimental_rerun()
         except Exception as e:
             st.sidebar.error(f"Error clearing files: {str(e)}")
+
+# Add memory usage information
+if st.sidebar.checkbox("Show Memory Usage"):
+    import psutil
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    memory_usage_mb = memory_info.rss / 1024 / 1024
+    st.sidebar.info(f"Current Memory Usage: {memory_usage_mb:.2f} MB")

@@ -61,6 +61,12 @@ class CustomEmbeddings:
     def embed_query(self, text):
         embedding = self.model.encode([text])[0]
         return embedding.tolist()
+    
+    # Add this method to make the object callable
+    def __call__(self, text):
+        if isinstance(text, list):
+            return self.embed_documents(text)
+        return self.embed_query(text)
 
 # Create tabs
 tab1, tab2 = st.tabs(["📁 Document Processing", "🔍 Query Documents"])

@@ -223,8 +223,12 @@ with tab2:
                 st.success("Model loaded successfully!")
                 
                 try:
-                    # Load vector store
-                    vector_store = FAISS.load_local(vector_store_path, embeddings)
+                    # Load vector store with the allow_dangerous_deserialization flag
+                    vector_store = FAISS.load_local(
+                        vector_store_path, 
+                        embeddings,
+                        allow_dangerous_deserialization=True  # Added this parameter to fix the error
+                    )
                     
                     # Create retriever
                     retriever = vector_store.as_retriever(search_kwargs={"k": 3})

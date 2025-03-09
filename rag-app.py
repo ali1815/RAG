@@ -14,10 +14,10 @@ from langchain.llms.base import LLM
 from typing import Optional, List, Mapping, Any
 
 # Set page config
-st.set_page_config(page_title="RAG Demo with Lightweight Models", page_icon="📚", layout="wide")
+st.set_page_config(page_title="RAG Demo with Reliable Models", page_icon="📚", layout="wide")
 
 # App title
-st.title("📚 RAG Application with Lightweight Models")
+st.title("📚 RAG Application with Reliable Models")
 
 # Sidebar with user instructions
 with st.sidebar:
@@ -31,25 +31,40 @@ with st.sidebar:
     model_name = st.selectbox(
         "Select Language Model",
         [
-            "google/flan-t5-small",  # 80M parameters
-            "google/flan-t5-base",   # 250M parameters
-            "facebook/opt-350m",     # 350M parameters
-            "facebook/opt-1.3b",     # 1.3B parameters
-            "mistralai/Mistral-7B-Instruct-v0.1"  # 7B parameters
+            "microsoft/phi-1_5",        # 1.3B parameter model that performs well
+            "TinyLlama/TinyLlama-1.1B-Chat-v1.0", # Excellent small model
+            "TheBloke/Phi-2-DML",       # Quantized powerful model
+            "google/flan-t5-base",      # Good for question answering
         ],
-        index=2  # Default to facebook/opt-350m which you mentioned is working
+        index=1  # Default to TinyLlama
+    )
+    
+    # Add device selection to manage memory
+    device = st.radio(
+        "Device for model inference:",
+        ["cpu", "cuda", "auto"],
+        index=2,  # Default to auto
+        help="Choose where to run the model. Auto will use GPU if available."
+    )
+    
+    # Add quantization option for memory efficiency
+    quantize = st.checkbox(
+        "Use 8-bit quantization", 
+        value=True,
+        help="Reduces memory usage but slightly lowers quality"
     )
     
     st.subheader("About")
     st.markdown("""
     This app uses:
     - *Streamlit* for the interface
-    - *Lightweight Hugging Face models* for text generation
+    - *Better performing small models* for text generation
     - *FAISS* for vector similarity search
     - *LangChain* for the RAG pipeline
+    - *Optimized settings* for reliable results
     """)
     
-    st.info("💡 Tip: Models like flan-t5-small and flan-t5-base are much lighter and faster, suitable for machines with limited RAM.")
+    st.info("💡 Tip: Use 8-bit quantization on machines with limited RAM.")
 
 # Create a custom embedding class using SentenceTransformer directly
 class CustomEmbeddings:
@@ -88,53 +103,51 @@ class CustomT5LLM(LLM):
     def _llm_type(self) -> str:
         return "custom_t5"
 
-class CustomOPTLLM(LLM):
-    def __init__(self, pipe):
+class CustomChatLLM(LLM):
+    def __init__(self, pipe, model_name):
         self.pipe = pipe
+        self.model_name = model_name
         super().__init__()
         
     def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        formatted_prompt = f"Question: {prompt}\nAnswer:"
-        result = self.pipe(formatted_prompt, max_new_tokens=100)[0]["generated_text"]
-        # Try to extract just the answer part
-        try:
-            response = result.split("Answer:")[-1].strip()
-            return response
-        except:
-            # If extraction fails, return the full result
-            return result
+        # Different formatting depending on model type
+        if "tinyllama" in self.model_name.lower():
+            formatted_prompt = f"<|system|>\nYou are a helpful assistant that answers questions based on provided context.\n<|user|>\nContext: {prompt}\nAnswer the question based on the context.\n<|assistant|>"
+        elif "phi" in self.model_name.lower():
+            formatted_prompt = f"Context: {prompt}\n\nAnswer based on the above context only."
+        else:
+            formatted_prompt = f"Context: {prompt}\n\nQuestion: Using the above context, please provide an answer.\nAnswer:"
         
-    @property
-    def _identifying_params(self) -> Mapping[str, Any]:
-        return {"name": "OPT Model"}
-        
-    @property
-    def _llm_type(self) -> str:
-        return "custom_opt"
-
-class CustomMistralLLM(LLM):
-    def __init__(self, pipe):
-        self.pipe = pipe
-        super().__init__()
-        
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        formatted_prompt = f"<s>[INST] {prompt} [/INST]"
         result = self.pipe(formatted_prompt, max_new_tokens=256)[0]["generated_text"]
-        # Try to extract just the response part
-        try:
-            response = result.split("[/INST]")[-1].strip()
-            return response
-        except:
-            # If extraction fails, return the full result
-            return result
+        
+        # Extract just the response based on model type
+        if "tinyllama" in self.model_name.lower():
+            try:
+                response = result.split("<|assistant|>")[-1].strip()
+                return response
+            except:
+                return result
+        elif "phi" in self.model_name.lower():
+            # Phi models usually complete directly
+            try:
+                response = result.split("Answer based on the above context only.")[-1].strip()
+                return response
+            except:
+                return result
+        else:
+            try:
+                response = result.split("Answer:")[-1].strip()
+                return response
+            except:
+                return result
         
     @property
     def _identifying_params(self) -> Mapping[str, Any]:
-        return {"name": "Mistral Model"}
+        return {"name": self.model_name}
         
     @property
     def _llm_type(self) -> str:
-        return "custom_mistral"
+        return "custom_chat_llm"
 
 # Create tabs
 tab1, tab2 = st.tabs(["📁 Document Processing", "🔍 Query Documents"])
@@ -219,17 +232,33 @@ with tab2:
         
         # Load language model
         @st.cache_resource
-        def load_llm(model_name):
+        def load_llm(model_name, device="auto", use_8bit=False):
             st.info(f"Loading {model_name}... This may take a few minutes.")
             
             try:
+                # Determine the device
+                if device == "auto":
+                    device_map = "auto"
+                    is_cuda = torch.cuda.is_available()
+                else:
+                    device_map = device
+                    is_cuda = device == "cuda"
+                
+                # Set the quantization configuration
+                if use_8bit and is_cuda:
+                    quantization_config = {"load_in_8bit": True}
+                else:
+                    quantization_config = {}
+                
                 # Specific handling for T5 models which use a different model class
                 if "t5" in model_name.lower():
                     tokenizer = AutoTokenizer.from_pretrained(model_name)
                     model = AutoModelForSeq2SeqLM.from_pretrained(
                         model_name,
-                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                        low_cpu_mem_usage=True
+                        torch_dtype=torch.float16 if is_cuda else torch.float32,
+                        low_cpu_mem_usage=True,
+                        device_map=device_map,
+                        **quantization_config
                     )
                     
                     # T5 models use 'text2text-generation' task
@@ -243,60 +272,35 @@ with tab2:
                     # Create a custom LLM that wraps the T5 pipeline
                     return CustomT5LLM(pipe)
                 
-                # For Mistral models
-                elif "mistral" in model_name.lower():
-                    tokenizer = AutoTokenizer.from_pretrained(model_name)
-                    model = AutoModelForCausalLM.from_pretrained(
-                        model_name,
-                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                        low_cpu_mem_usage=True
-                    )
-                    
-                    # Create pipeline
-                    pipe = pipeline(
-                        "text-generation",
-                        model=model,
-                        tokenizer=tokenizer,
-                        max_new_tokens=256,
-                        temperature=0.7,
-                        top_p=0.9,
-                        repetition_penalty=1.1,
-                        do_sample=True
-                    )
-                    
-                    # Return custom Mistral LLM
-                    return CustomMistralLLM(pipe)
-                    
-                # For OPT and other causal language models
+                # For all other models (better performing small models)
                 else:
                     tokenizer = AutoTokenizer.from_pretrained(model_name)
                     # Make sure padding token is set
                     if tokenizer.pad_token is None:
                         tokenizer.pad_token = tokenizer.eos_token
-                        
+                    
                     model = AutoModelForCausalLM.from_pretrained(
                         model_name,
-                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                        low_cpu_mem_usage=True
+                        torch_dtype=torch.float16 if is_cuda else torch.float32,
+                        low_cpu_mem_usage=True,
+                        device_map=device_map,
+                        **quantization_config
                     )
                     
-                    # Create pipeline with optimized settings for OPT
+                    # Create pipeline with optimized settings
                     pipe = pipeline(
                         "text-generation",
                         model=model,
                         tokenizer=tokenizer,
-                        max_new_tokens=100,  # Shorter responses to avoid hallucination
-                        temperature=0.3,     # Lower temperature for more factual responses
-                        top_p=0.9,
-                        repetition_penalty=1.2
+                        max_new_tokens=256,
+                        temperature=0.1,  # Lower temperature for more focused responses
+                        top_p=0.95,
+                        repetition_penalty=1.15,
+                        do_sample=True
                     )
                     
-                    # Return custom OPT LLM for better prompt formatting
-                    if "opt" in model_name.lower():
-                        return CustomOPTLLM(pipe)
-                    else:
-                        llm = HuggingFacePipeline(pipeline=pipe)
-                        return llm
+                    # Return custom Chat LLM
+                    return CustomChatLLM(pipe, model_name)
                     
             except Exception as e:
                 st.error(f"Error loading model: {str(e)}")
@@ -305,7 +309,7 @@ with tab2:
         
         # Load the model
         with st.spinner("Preparing the model... This may take a while for the first time."):
-            llm = load_llm(model_name)
+            llm = load_llm(model_name, device=device, use_8bit=quantize)
             if llm:
                 st.success("Model loaded successfully!")
                 
@@ -317,13 +321,13 @@ with tab2:
                         allow_dangerous_deserialization=True
                     )
                     
-                    # Create retriever
-                    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+                    # Create retriever with more retrieved documents for better context
+                    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
                     
-                    # Create QA chain
+                    # Create QA chain with return_source_documents=True to see sources
                     qa_chain = RetrievalQA.from_chain_type(
                         llm=llm,
-                        chain_type="stuff",
+                        chain_type="stuff",  # Combines documents into a single context
                         retriever=retriever,
                         return_source_documents=True
                     )
@@ -349,7 +353,7 @@ with tab2:
                                     st.divider()
                             except Exception as e:
                                 st.error(f"Error generating answer: {str(e)}")
-                                st.error("This might be due to model limitations. Try with a simpler question or a different model.")
+                                st.error("This might be due to model limitations. Try a different model or reformulate your question.")
                 except Exception as e:
                     st.error(f"Error loading vector store: {str(e)}")
     else:
@@ -362,6 +366,10 @@ if st.sidebar.checkbox("Show Memory Usage"):
     memory_info = process.memory_info()
     memory_usage_mb = memory_info.rss / 1024 / 1024
     st.sidebar.info(f"Current Memory Usage: {memory_usage_mb:.2f} MB")
+    
+    # Show RAM warning if we're using a lot of memory
+    if memory_usage_mb > 4000:  # Over 4GB
+        st.sidebar.warning("High memory usage detected. Consider using 8-bit quantization or a smaller model.")
 
 # Handle session state cleanup
 if 'temp_dir' in st.session_state and os.path.exists(st.session_state['temp_dir']):

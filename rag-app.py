@@ -1,7 +1,7 @@
 # app.py
 import os
 import streamlit as st
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
@@ -82,7 +82,7 @@ with tab1:
                 # Create embeddings
                 embeddings = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/all-MiniLM-L6-v2",
-                    model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'}
+                    model_kwargs={'device': 'cpu'} # Force CPU to avoid CUDA issues
                 )
                 
                 # Create vector store
@@ -118,7 +118,8 @@ with tab2:
                 max_new_tokens=512,
                 temperature=0.7,
                 top_p=0.9,
-                repetition_penalty=1.1
+                repetition_penalty=1.1,
+                device_map="auto"
             )
             
             llm = HuggingFacePipeline(pipeline=pipe)
@@ -132,7 +133,7 @@ with tab2:
         # Load embeddings and vector store
         embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'}
+            model_kwargs={'device': 'cpu'} # Force CPU to avoid CUDA issues
         )
         vectorstore = FAISS.load_local("faiss_index", embeddings)
         

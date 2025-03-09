@@ -1,7 +1,7 @@
 # app.py
 import os
 import streamlit as st
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
@@ -41,6 +41,7 @@ with st.sidebar:
     - *LangChain* for the RAG pipeline
     """)
 
+# Create a custom embedding class using SentenceTransformer directly
 class CustomEmbeddings:
     def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model_name, device="cpu")
@@ -107,13 +108,10 @@ with tab1:
                     texts = [chunk.page_content for chunk in chunks]
                     metadatas = [chunk.metadata for chunk in chunks]
                     
-                    # Generate embeddings
-                    embeddings_list = embeddings.embed_documents(texts)
-                    
-                    # Create and save FAISS index
-                    vector_store = FAISS.from_embeddings(
-                        text_embeddings=list(zip(texts, embeddings_list)),
-                        embedding=embeddings,
+                    # Create FAISS index using from_texts
+                    vector_store = FAISS.from_texts(
+                        texts,
+                        embeddings,  # Pass the embeddings object directly
                         metadatas=metadatas
                     )
                     

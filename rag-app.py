@@ -30,7 +30,6 @@ with st.sidebar:
         "Select Language Model",
         [
             "facebook/opt-350m",     # 350M parameters
-
         ],
         index=1  # Default to flan-t5-base
     )
@@ -43,8 +42,6 @@ with st.sidebar:
     - *FAISS* for vector similarity search
     - *LangChain* for the RAG pipeline
     """)
-    
-    st.info("💡 Tip: Models like flan-t5-small and flan-t5-base are much lighter and faster, suitable for machines with limited RAM.")
 
 # Create a custom embedding class using SentenceTransformer directly
 class CustomEmbeddings:

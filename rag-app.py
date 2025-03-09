@@ -29,11 +29,8 @@ with st.sidebar:
     model_name = st.selectbox(
         "Select Language Model",
         [
-            "google/flan-t5-small",  # 80M parameters
-            "google/flan-t5-base",   # 250M parameters
             "facebook/opt-350m",     # 350M parameters
-            "facebook/opt-1.3b",     # 1.3B parameters
-            "mistralai/Mistral-7B-Instruct-v0.1"  # 7B parameters
+
         ],
         index=1  # Default to flan-t5-base
     )

@@ -1,7 +1,7 @@
 # app.py
 import os
 import streamlit as st
-from langchain.text_splitters import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
